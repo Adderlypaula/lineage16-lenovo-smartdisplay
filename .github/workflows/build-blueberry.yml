@@ -29,7 +29,7 @@ jobs:
       - name: Build LineageOS 16 for Blueberry in Ubuntu 20.04
         shell: bash
         run: |
-          set -euxo pipefail
+          set -eo pipefail
 
           docker pull ubuntu:20.04
 
@@ -43,7 +43,7 @@ jobs:
             -v "$GITHUB_WORKSPACE/_android:/build" \
             ubuntu:20.04 \
             bash -lc '
-              set -euxo pipefail
+              set -eo pipefail
 
               apt-get update
               apt-get install -y --no-install-recommends \
@@ -62,28 +62,57 @@ jobs:
               curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /root/bin/repo
               chmod +x /root/bin/repo
               export PATH=/root/bin:$PATH
+
               export USE_CCACHE=1
               export CCACHE_DIR=/build/ccache
               ccache -M 15G || true
 
               cd /src
-              repo init -u https://github.com/LineageOS/android.git -b lineage-16.0 --depth=1
+
+              repo init \
+                -u https://github.com/LineageOS/android.git \
+                -b lineage-16.0 \
+                --depth=1
 
               mkdir -p .repo/local_manifests
-              cp /port/blueberry_manifest_lineage16.xml .repo/local_manifests/blueberry.xml
+              cp /port/blueberry_manifest_lineage16.xml \
+                .repo/local_manifests/blueberry.xml
 
-              repo sync -c --force-sync --no-clone-bundle --no-tags -j1 --fail-fast
+              repo sync \
+                -c \
+                --force-sync \
+                --no-clone-bundle \
+                --no-tags \
+                -j1 \
+                --fail-fast
 
-              rm -rf device/lenovo/blueberry vendor/lenovo/blueberry
-              mkdir -p device/lenovo vendor/lenovo
-              cp -a /port/lineage16_seed/device/lenovo/blueberry device/lenovo/
-              cp -a /port/lineage16_seed/vendor/lenovo/blueberry vendor/lenovo/
+              rm -rf device/lenovo/blueberry
+              rm -rf vendor/lenovo/blueberry
+
+              mkdir -p device/lenovo
+              mkdir -p vendor/lenovo
+
+              cp -a \
+                /port/lineage16_seed/device/lenovo/blueberry \
+                device/lenovo/
+
+              cp -a \
+                /port/lineage16_seed/vendor/lenovo/blueberry \
+                vendor/lenovo/
+
+              set +u
 
               source build/envsetup.sh
+
               lunch lineage_blueberry-userdebug
-              mka -j2 bootimage systemimage vendorimage
+
+              mka -j2 \
+                bootimage \
+                systemimage \
+                vendorimage
 
               mkdir -p /build/artifacts
+
               PRODUCT_OUT=out/target/product/blueberry
 
               for f in boot.img system.img vendor.img vbmeta.img; do
@@ -92,7 +121,9 @@ jobs:
                 fi
               done
 
-              find "$PRODUCT_OUT" -maxdepth 1 -type f \
+              find "$PRODUCT_OUT" \
+                -maxdepth 1 \
+                -type f \
                 \( -name "lineage-16.0-*.zip" -o -name "*.img" \) \
                 -exec cp -vn {} /build/artifacts/ \; || true
 
@@ -102,10 +133,14 @@ jobs:
       - name: Verify required artifacts
         shell: bash
         run: |
-          set -eux
+          set -e
           ls -lah "$GITHUB_WORKSPACE/_android/artifacts"
-          test -f "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
-          test -f "$GITHUB_WORKSPACE/_android/artifacts/system.img"
+
+          test -f \
+            "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
+
+          test -f \
+            "$GITHUB_WORKSPACE/_android/artifacts/system.img"
 
       - name: Upload Blueberry build
         uses: actions/upload-artifact@v4
