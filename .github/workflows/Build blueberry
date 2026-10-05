@@ -1,0 +1,59 @@
+name: Build Blueberry LineageOS 16
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout Blueberry port repo
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: false   # keep swap, Soong/linking can OOM without it
+
+      - name: Build in Ubuntu 20.04 container
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_android"
+          docker pull ubuntu:20.04
+          docker run --rm \
+            --privileged \
+            --network host \
+            -e USER=root \
+            -e HOME=/root \
+            -v "$GITHUB_WORKSPACE:/port:ro" \
+            -v "$GITHUB_WORKSPACE/_android:/build" \
+            ubuntu:20.04 \
+            bash /port/scripts/build.sh
+
+      - name: Verify boot image
+        if: always()
+        shell: bash
+        run: |
+          ls -lah "$GITHUB_WORKSPACE/_android/artifacts" || true
+          test -f "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
+
+      - name: Upload build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blueberry-lineage16-build
+          path: _android/artifacts/*
+          if-no-files-found: error
+          retention-days: 7
