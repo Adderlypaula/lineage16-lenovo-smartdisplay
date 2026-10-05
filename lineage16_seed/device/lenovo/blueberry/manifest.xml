@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest version="1.0" type="device">
+
     <!-- Gralloc HAL -->
     <hal format="hidl">
         <name>android.hardware.graphics.allocator</name>
@@ -10,16 +11,18 @@
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- Mapper HAL -->
     <hal format="hidl">
         <name>android.hardware.graphics.mapper</name>
-        <transport>passthrough</transport>
+        <transport arch="32">passthrough</transport>
         <version>2.0</version>
         <interface>
             <name>IMapper</name>
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- Composer HAL -->
     <hal format="hidl">
         <name>android.hardware.graphics.composer</name>
@@ -30,16 +33,18 @@
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- RenderScript -->
     <hal format="hidl">
         <name>android.hardware.renderscript</name>
-        <transport>passthrough</transport>
+        <transport arch="32">passthrough</transport>
         <version>1.0</version>
         <interface>
             <name>IDevice</name>
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- Keymaster -->
     <hal format="hidl">
         <name>android.hardware.keymaster</name>
@@ -50,6 +55,7 @@
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- Health -->
     <hal format="hidl">
         <name>android.hardware.health</name>
@@ -60,14 +66,16 @@
             <instance>default</instance>
         </interface>
     </hal>
+
     <!-- Memtrack -->
     <hal format="hidl">
         <name>android.hardware.memtrack</name>
-        <transport>passthrough</transport>
+        <transport arch="32">passthrough</transport>
         <version>1.0</version>
         <interface>
             <name>IMemtrack</name>
             <instance>default</instance>
         </interface>
     </hal>
+
 </manifest>
