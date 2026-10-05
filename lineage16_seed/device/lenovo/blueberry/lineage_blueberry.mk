@@ -16,6 +16,7 @@ PRODUCT_NAME       := lineage_blueberry
 PRODUCT_BRAND      := Lenovo
 PRODUCT_MODEL      := Lenovo Smart Display 10
 PRODUCT_MANUFACTURER := Lenovo
+PRODUCT_ENFORCE_VINTF_MANIFEST := false
 
 PRODUCT_GMS_CLIENTID_BASE := android-lenovo
 
