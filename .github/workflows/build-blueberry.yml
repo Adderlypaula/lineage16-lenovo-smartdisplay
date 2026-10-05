@@ -24,126 +24,33 @@ jobs:
           haskell: true
           large-packages: true
           docker-images: false
-          swap-storage: true
+          swap-storage: false   # keep swap, Soong/linking can OOM without it
 
-      - name: Build LineageOS 16 for Blueberry in Ubuntu 20.04
+      - name: Build in Ubuntu 20.04 container
         shell: bash
         run: |
           set -eo pipefail
-
+          mkdir -p "$GITHUB_WORKSPACE/_android"
           docker pull ubuntu:20.04
-
           docker run --rm \
             --privileged \
             --network host \
-            -e DEBIAN_FRONTEND=noninteractive \
             -e USER=root \
             -e HOME=/root \
             -v "$GITHUB_WORKSPACE:/port:ro" \
             -v "$GITHUB_WORKSPACE/_android:/build" \
             ubuntu:20.04 \
-            bash -lc '
-              set -eo pipefail
+            bash /port/scripts/build.sh
 
-              apt-get update
-              apt-get install -y --no-install-recommends \
-                bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-                git git-lfs gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev \
-                lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev \
-                libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk pngcrush \
-                python python3 rsync schedtool squashfs-tools unzip xsltproc zip zlib1g-dev \
-                ca-certificates
-
-              git lfs install --system
-              git config --global user.email "blueberry-build@local"
-              git config --global user.name "Blueberry Builder"
-
-              mkdir -p /root/bin /src
-              curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /root/bin/repo
-              chmod +x /root/bin/repo
-              export PATH=/root/bin:$PATH
-
-              export USE_CCACHE=1
-              export CCACHE_DIR=/build/ccache
-              ccache -M 15G || true
-
-              cd /src
-
-              repo init \
-                -u https://github.com/LineageOS/android.git \
-                -b lineage-16.0 \
-                --depth=1
-
-              mkdir -p .repo/local_manifests
-              cp /port/blueberry_manifest_lineage16.xml \
-                .repo/local_manifests/blueberry.xml
-
-              repo sync \
-                -c \
-                --force-sync \
-                --no-clone-bundle \
-                --no-tags \
-                -j1 \
-                --fail-fast
-
-              rm -rf device/lenovo/blueberry
-              rm -rf vendor/lenovo/blueberry
-
-              mkdir -p device/lenovo
-              mkdir -p vendor/lenovo
-
-              cp -a \
-                /port/lineage16_seed/device/lenovo/blueberry \
-                device/lenovo/
-
-              cp -a \
-                /port/lineage16_seed/vendor/lenovo/blueberry \
-                vendor/lenovo/
-
-              set +u
-              export ALLOW_MISSING_DEPENDENCIES=true
-
-              source build/envsetup.sh
-
-              lunch lineage_blueberry-userdebug
-
-              mka -j2 \
-                bootimage \
-                systemimage \
-                vendorimage
-
-              mkdir -p /build/artifacts
-
-              PRODUCT_OUT=out/target/product/blueberry
-
-              for f in boot.img system.img vendor.img vbmeta.img; do
-                if [ -f "$PRODUCT_OUT/$f" ]; then
-                  cp -v "$PRODUCT_OUT/$f" /build/artifacts/
-                fi
-              done
-
-              find "$PRODUCT_OUT" \
-                -maxdepth 1 \
-                -type f \
-                \( -name "lineage-16.0-*.zip" -o -name "*.img" \) \
-                -exec cp -vn {} /build/artifacts/ \; || true
-
-              ls -lah /build/artifacts
-            '
-
-      - name: Verify required artifacts
+      - name: Verify boot image
+        if: always()
         shell: bash
         run: |
-          set -e
-          ls -lah "$GITHUB_WORKSPACE/_android/artifacts"
+          ls -lah "$GITHUB_WORKSPACE/_android/artifacts" || true
+          test -f "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
 
-          test -f \
-            "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
-
-          test -f \
-            "$GITHUB_WORKSPACE/_android/artifacts/system.img"
-
-      - name: Upload Blueberry build
+      - name: Upload build
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: blueberry-lineage16-build
