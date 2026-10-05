@@ -101,6 +101,7 @@ jobs:
                 vendor/lenovo/
 
               set +u
+              export ALLOW_MISSING_DEPENDENCIES=true
 
               source build/envsetup.sh
 
