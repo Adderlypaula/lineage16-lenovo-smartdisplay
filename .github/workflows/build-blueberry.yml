@@ -1,4 +1,4 @@
-name: Build Blueberry LineageOS 16 Bring-up
+name: Build Blueberry Android 8.1 Bring-up
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Checkout Blueberry port repo
+      - name: Checkout Blueberry repo
         uses: actions/checkout@v4
 
       - name: Free runner disk space
@@ -26,7 +26,7 @@ jobs:
           docker-images: false
           swap-storage: true
 
-      - name: Build Blueberry bring-up images
+      - name: Build LineageOS 15.1 for Blueberry
         shell: bash
         run: |
           set -eo pipefail
@@ -40,7 +40,7 @@ jobs:
             -e USER=root \
             -e HOME=/root \
             -v "$GITHUB_WORKSPACE:/port:ro" \
-            -v "$GITHUB_WORKSPACE/_android:/build" \
+            -v "$GITHUB_WORKSPACE/_android8:/build" \
             ubuntu:20.04 \
             bash -lc '
               set -eo pipefail
@@ -56,7 +56,7 @@ jobs:
 
               git lfs install --system || true
               git config --global user.email "blueberry-build@local"
-              git config --global user.name "Blueberry Builder"
+              git config --global user.name "Blueberry Android 8 Builder"
 
               mkdir -p /root/bin /src /build/artifacts
               curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
@@ -72,12 +72,29 @@ jobs:
 
               repo init \
                 -u https://github.com/LineageOS/android.git \
-                -b lineage-16.0 \
+                -b lineage-15.1 \
                 --depth=1
 
               mkdir -p .repo/local_manifests
-              cp /port/blueberry_manifest_lineage16.xml \
-                .repo/local_manifests/blueberry.xml
+
+              cat > .repo/local_manifests/blueberry-oreo.xml <<EOF
+              <?xml version="1.0" encoding="UTF-8"?>
+              <manifest>
+                <!-- Known-good Android 8.1 reference implementation for the related Starfire platform -->
+                <project name="Starfire-development/android_device_lenovo_starfire"
+                         path="device/lenovo/starfire_ref"
+                         remote="github"
+                         revision="lineage-15.1" />
+                <project name="Starfire-development/proprietary_vendor_lenovo_starfire"
+                         path="vendor/lenovo/starfire"
+                         remote="github"
+                         revision="lineage-15.1" />
+                <project name="Starfire-development/android_kernel_lenovo_apq8053"
+                         path="kernel/lenovo/apq8053_ref"
+                         remote="github"
+                         revision="lineage-15.1" />
+              </manifest>
+              EOF
 
               repo sync \
                 -c \
@@ -87,70 +104,85 @@ jobs:
                 -j1 \
                 --fail-fast
 
+              echo "=== Installing Blueberry device/vendor seed ==="
+
               rm -rf device/lenovo/blueberry vendor/lenovo/blueberry
               mkdir -p device/lenovo vendor/lenovo
 
-              cp -a /port/lineage16_seed/device/lenovo/blueberry device/lenovo/
-              cp -a /port/lineage16_seed/vendor/lenovo/blueberry vendor/lenovo/
+              cp -a /port/lineage16_seed/device/lenovo/blueberry \
+                device/lenovo/
+
+              cp -a /port/lineage16_seed/vendor/lenovo/blueberry \
+                vendor/lenovo/
 
               DEVICE=device/lenovo/blueberry
 
-              echo "=== Applying Blueberry bring-up fixes ==="
+              echo "=== Adapting Blueberry seed for Android 8.1 ==="
 
-              # 1) This seed uses the stock prebuilt zImage.
-              if ! grep -q "^BOARD_KERNEL_IMAGE_NAME" "$DEVICE/BoardConfig.mk"; then
-                sed -i \
-                  "/TARGET_PREBUILT_KERNEL/a BOARD_KERNEL_IMAGE_NAME := zImage" \
-                  "$DEVICE/BoardConfig.mk"
+              # Preserve the actual Blueberry stock prebuilt kernel/DTB path.
+              if grep -q "^TARGET_PREBUILT_KERNEL" "$DEVICE/BoardConfig.mk"; then
+                if ! grep -q "^BOARD_KERNEL_IMAGE_NAME" "$DEVICE/BoardConfig.mk"; then
+                  sed -i \
+                    "/TARGET_PREBUILT_KERNEL/a BOARD_KERNEL_IMAGE_NAME := zImage" \
+                    "$DEVICE/BoardConfig.mk"
+                fi
               fi
 
-              # 2) Android 9 VINTF parser requires an architecture on passthrough HALs.
+              # Blueberry is a 32-bit ARM userspace.
+              sed -i "s/^PLATFORM_VERSION.*/PLATFORM_VERSION         := 8.1/" \
+                "$DEVICE/BoardConfig.mk" || true
+
+              # Android 8.1 bring-up: do not enforce a complete Treble/VINTF contract yet.
+              sed -i "/PRODUCT_FULL_TREBLE_OVERRIDE/d" "$DEVICE/BoardConfig.mk" || true
+              sed -i "/PRODUCT_ENFORCE_VINTF_MANIFEST/d" "$DEVICE/lineage_blueberry.mk" || true
+              printf "\n# Android 8.1 bring-up\nPRODUCT_ENFORCE_VINTF_MANIFEST := false\n" \
+                >> "$DEVICE/lineage_blueberry.mk"
+
+              # Passthrough HIDL HALs require a 32-bit arch declaration.
               if [ -f "$DEVICE/manifest.xml" ]; then
                 sed -i \
                   "s#<transport>passthrough</transport>#<transport arch=\"32\">passthrough</transport>#g" \
                   "$DEVICE/manifest.xml"
               fi
 
-              # 3) Keep strict VINTF disabled for first boot/ADB bring-up.
-              if [ -f "$DEVICE/lineage_blueberry.mk" ] && \
-                 ! grep -q "^PRODUCT_ENFORCE_VINTF_MANIFEST" "$DEVICE/lineage_blueberry.mk"; then
-                printf "\n# Temporary bring-up setting\nPRODUCT_ENFORCE_VINTF_MANIFEST := false\n" \
-                  >> "$DEVICE/lineage_blueberry.mk"
-              fi
-
-              echo "=== Effective BoardConfig kernel section ==="
-              grep -n -E "TARGET_PREBUILT_KERNEL|BOARD_KERNEL_IMAGE_NAME|BOARD_KERNEL_BASE|BOARD_KERNEL_CMDLINE" \
-                "$DEVICE/BoardConfig.mk" || true
-
-              echo "=== Effective passthrough HALs ==="
-              grep -n -B2 -A2 "passthrough" "$DEVICE/manifest.xml" || true
-
-              set +u
+              # First milestone is boot/display/touch/ADB, not strict dependency completeness.
               export ALLOW_MISSING_DEPENDENCIES=true
 
+              # Older Lineage envsetup does not tolerate bash nounset.
+              set +u
               source build/envsetup.sh
+
               lunch lineage_blueberry-userdebug
 
-              echo "=== Building boot/system/vendor ==="
+              echo "=== Blueberry Android 8.1 configuration ==="
+              grep -n -E \
+                "TARGET_PREBUILT_KERNEL|BOARD_KERNEL_IMAGE_NAME|BOARD_KERNEL_BASE|BOARD_SYSTEMIMAGE_PARTITION_SIZE|BOARD_VENDORIMAGE_PARTITION_SIZE" \
+                "$DEVICE/BoardConfig.mk" || true
+
+              echo "=== Building Android 8.1 bring-up images ==="
               mka -j2 bootimage systemimage vendorimage
 
               PRODUCT_OUT=out/target/product/blueberry
 
-              for f in boot.img system.img vendor.img vbmeta.img; do
+              for f in boot.img system.img vendor.img recovery.img; do
                 if [ -f "$PRODUCT_OUT/$f" ]; then
                   cp -v "$PRODUCT_OUT/$f" /build/artifacts/
                 fi
               done
 
-              # Useful diagnostics for us before anything gets flashed.
               {
-                echo "Blueberry LineageOS 16 bring-up build"
+                echo "Blueberry Android 8.1 / LineageOS 15.1 bring-up"
                 echo
-                echo "Generated:"
+                echo "Target: Lenovo SD-X701B / Blueberry"
+                echo "Architecture: ARM 32-bit"
+                echo "Kernel strategy: Blueberry stock prebuilt kernel"
+                echo
+                echo "Generated files:"
                 ls -lh /build/artifacts || true
                 echo
-                echo "Partition-related BoardConfig:"
-                grep -E "PARTITION_SIZE|BOARD_KERNEL|TARGET_PREBUILT_KERNEL" \
+                echo "Partition settings:"
+                grep -E \
+                  "BOARD_(BOOT|SYSTEM|VENDOR)IMAGE_PARTITION_SIZE|TARGET_PREBUILT_KERNEL|BOARD_KERNEL" \
                   "$DEVICE/BoardConfig.mk" || true
               } > /build/artifacts/BUILD-INFO.txt
 
@@ -161,18 +193,18 @@ jobs:
               ls -lah /build/artifacts
             '
 
-      - name: Verify bring-up artifacts
+      - name: Verify required artifacts
         shell: bash
         run: |
           set -e
-          ls -lah "$GITHUB_WORKSPACE/_android/artifacts"
-          test -f "$GITHUB_WORKSPACE/_android/artifacts/boot.img"
-          test -f "$GITHUB_WORKSPACE/_android/artifacts/system.img"
+          ls -lah "$GITHUB_WORKSPACE/_android8/artifacts"
+          test -f "$GITHUB_WORKSPACE/_android8/artifacts/boot.img"
+          test -f "$GITHUB_WORKSPACE/_android8/artifacts/system.img"
 
-      - name: Upload Blueberry bring-up build
+      - name: Upload Blueberry Android 8.1 build
         uses: actions/upload-artifact@v4
         with:
-          name: blueberry-lineage16-bringup
-          path: _android/artifacts/*
+          name: blueberry-android8-bringup
+          path: _android8/artifacts/*
           if-no-files-found: error
           retention-days: 7
